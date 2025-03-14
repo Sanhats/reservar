@@ -33,7 +33,11 @@ export default function RegisterPage() {
     setIsLoading(true)
 
     try {
-      const { data, error } = await signUp(email, password)
+      // Registrar al usuario con Supabase Auth, incluyendo los metadatos
+      const { data, error } = await signUp(email, password, {
+        full_name: name,
+        user_type: "client",
+      })
 
       if (error) {
         toast({
@@ -44,27 +48,6 @@ export default function RegisterPage() {
         return
       }
 
-      // Si el registro es exitoso, guardar el perfil del usuario
-      if (data.user) {
-        const { error: profileError } = await supabase.from("profiles").insert([
-          {
-            id: data.user.id,
-            full_name: name,
-            email: email,
-            user_type: "client",
-          },
-        ])
-
-        if (profileError) {
-          toast({
-            title: "Error al crear perfil",
-            description: profileError.message,
-            variant: "destructive",
-          })
-          return
-        }
-      }
-
       toast({
         title: "Registro exitoso",
         description: "Se ha enviado un correo de confirmación a tu email",
@@ -72,6 +55,7 @@ export default function RegisterPage() {
 
       router.push("/login")
     } catch (error) {
+      console.error("Error al registrarse:", error)
       toast({
         title: "Error al registrarse",
         description: "Ocurrió un error inesperado",
@@ -87,7 +71,11 @@ export default function RegisterPage() {
     setIsLoading(true)
 
     try {
-      const { data, error } = await signUp(email, password)
+      // Registrar al usuario con Supabase Auth, incluyendo los metadatos
+      const { data, error } = await signUp(email, password, {
+        full_name: name,
+        user_type: "business",
+      })
 
       if (error) {
         toast({
@@ -98,43 +86,36 @@ export default function RegisterPage() {
         return
       }
 
-      // Si el registro es exitoso, guardar el perfil del negocio
+      // Si el registro es exitoso, intentar crear el negocio
       if (data.user) {
-        const { error: profileError } = await supabase.from("profiles").insert([
-          {
-            id: data.user.id,
-            full_name: name,
-            email: email,
-            user_type: "business",
-          },
-        ])
+        try {
+          const { error: businessError } = await supabase.from("businesses").insert([
+            {
+              owner_id: data.user.id,
+              name: businessName,
+              type: businessType,
+              phone: phone,
+              status: "pending_verification",
+            },
+          ])
 
-        if (profileError) {
+          if (businessError) {
+            console.error("Error al crear negocio:", businessError)
+            toast({
+              title: "Advertencia",
+              description:
+                "Tu cuenta se creó pero hubo un problema al configurar tu negocio. Podrás completarlo más tarde.",
+              variant: "default",
+            })
+          }
+        } catch (businessError) {
+          console.error("Error al crear negocio:", businessError)
           toast({
-            title: "Error al crear perfil",
-            description: profileError.message,
-            variant: "destructive",
+            title: "Advertencia",
+            description:
+              "Tu cuenta se creó pero hubo un problema al configurar tu negocio. Podrás completarlo más tarde.",
+            variant: "default",
           })
-          return
-        }
-
-        const { error: businessError } = await supabase.from("businesses").insert([
-          {
-            owner_id: data.user.id,
-            name: businessName,
-            type: businessType,
-            phone: phone,
-            status: "pending_verification",
-          },
-        ])
-
-        if (businessError) {
-          toast({
-            title: "Error al crear negocio",
-            description: businessError.message,
-            variant: "destructive",
-          })
-          return
         }
       }
 
@@ -145,6 +126,7 @@ export default function RegisterPage() {
 
       router.push("/login")
     } catch (error) {
+      console.error("Error al registrarse:", error)
       toast({
         title: "Error al registrarse",
         description: "Ocurrió un error inesperado",
@@ -155,6 +137,7 @@ export default function RegisterPage() {
     }
   }
 
+  // Actualizar la función signUp en lib/auth.tsx para incluir metadatos
   const handleGoogleRegister = async () => {
     setIsLoading(true)
     try {
@@ -169,6 +152,7 @@ export default function RegisterPage() {
     }
   }
 
+  // El resto del componente permanece igual
   return (
     <div className="container flex items-center justify-center min-h-[calc(100vh-8rem)] py-12">
       <Card className="w-full max-w-md">

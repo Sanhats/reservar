@@ -11,6 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/lib/auth"
 import { useToast } from "@/hooks/use-toast"
 import { supabase } from "@/lib/supabase"
+import RouteGuard from "@/components/route-guard"
 
 type Profile = {
   id: string
@@ -95,88 +96,82 @@ export default function ProfilePage() {
     }
   }
 
-  if (!user || !profile) {
-    return (
-      <div className="container py-10">
-        <Card>
-          <CardContent className="pt-6">
-            <div className="flex justify-center items-center h-40">
-              <p>Cargando información del perfil...</p>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
   return (
-    <div className="container py-10">
-      <h1 className="text-3xl font-bold mb-6">Mi Perfil</h1>
+    <RouteGuard>
+      <div className="container py-10">
+        <h1 className="text-3xl font-bold mb-6">Mi Perfil</h1>
 
-      <Tabs defaultValue="personal" className="w-full">
-        <TabsList className="grid w-full grid-cols-2 mb-8">
-          <TabsTrigger value="personal">Información Personal</TabsTrigger>
-          <TabsTrigger value="security">Seguridad</TabsTrigger>
-        </TabsList>
-        <TabsContent value="personal">
-          <Card>
-            <CardHeader>
-              <CardTitle>Información Personal</CardTitle>
-              <CardDescription>Actualiza tu información personal</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <form onSubmit={updateProfile} className="space-y-4">
+        <Tabs defaultValue="personal" className="w-full">
+          <TabsList className="grid w-full grid-cols-2 mb-8">
+            <TabsTrigger value="personal">Información Personal</TabsTrigger>
+            <TabsTrigger value="security">Seguridad</TabsTrigger>
+          </TabsList>
+          <TabsContent value="personal">
+            <Card>
+              <CardHeader>
+                <CardTitle>Información Personal</CardTitle>
+                <CardDescription>Actualiza tu información personal</CardDescription>
+              </CardHeader>
+              <CardContent>
+                {!profile ? (
+                  <div className="flex justify-center items-center h-40">
+                    <p>Cargando información del perfil...</p>
+                  </div>
+                ) : (
+                  <form onSubmit={updateProfile} className="space-y-4">
+                    <div className="space-y-2">
+                      <Label htmlFor="email">Email</Label>
+                      <Input id="email" type="email" value={user?.email || ""} disabled />
+                      <p className="text-sm text-muted-foreground">El email no se puede cambiar</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="fullName">Nombre completo</Label>
+                      <Input
+                        id="fullName"
+                        type="text"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Teléfono</Label>
+                      <Input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                    </div>
+                    <Button type="submit" disabled={isLoading}>
+                      {isLoading ? "Guardando..." : "Guardar cambios"}
+                    </Button>
+                  </form>
+                )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+          <TabsContent value="security">
+            <Card>
+              <CardHeader>
+                <CardTitle>Seguridad</CardTitle>
+                <CardDescription>Administra tu contraseña y la seguridad de tu cuenta</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" value={user.email || ""} disabled />
-                  <p className="text-sm text-muted-foreground">El email no se puede cambiar</p>
+                  <Label htmlFor="current-password">Contraseña actual</Label>
+                  <Input id="current-password" type="password" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="fullName">Nombre completo</Label>
-                  <Input
-                    id="fullName"
-                    type="text"
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    required
-                  />
+                  <Label htmlFor="new-password">Nueva contraseña</Label>
+                  <Input id="new-password" type="password" />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="phone">Teléfono</Label>
-                  <Input id="phone" type="tel" value={phone} onChange={(e) => setPhone(e.target.value)} />
+                  <Label htmlFor="confirm-password">Confirmar nueva contraseña</Label>
+                  <Input id="confirm-password" type="password" />
                 </div>
-                <Button type="submit" disabled={isLoading}>
-                  {isLoading ? "Guardando..." : "Guardar cambios"}
-                </Button>
-              </form>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="security">
-          <Card>
-            <CardHeader>
-              <CardTitle>Seguridad</CardTitle>
-              <CardDescription>Administra tu contraseña y la seguridad de tu cuenta</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="current-password">Contraseña actual</Label>
-                <Input id="current-password" type="password" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="new-password">Nueva contraseña</Label>
-                <Input id="new-password" type="password" />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirm-password">Confirmar nueva contraseña</Label>
-                <Input id="confirm-password" type="password" />
-              </div>
-              <Button>Cambiar contraseña</Button>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-    </div>
+                <Button>Cambiar contraseña</Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        </Tabs>
+      </div>
+    </RouteGuard>
   )
 }
 

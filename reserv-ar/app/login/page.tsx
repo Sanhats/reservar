@@ -2,9 +2,9 @@
 
 import type React from "react"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,32 +18,71 @@ export default function LoginPage() {
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const router = useRouter()
-  const { signIn, signInWithGoogle } = useAuth()
+  const searchParams = useSearchParams()
+  const redirectPath = searchParams.get("redirectedFrom") || "/dashboard"
+  const { signIn, signInWithGoogle, user, isLoading: authLoading, refreshSession } = useAuth()
   const { toast } = useToast()
+  const [authStatus, setAuthStatus] = useState<string>("checking")
+  const [refreshed, setRefreshed] = useState(false)
+
+  // Verificar el estado de autenticación
+  useEffect(() => {
+    const checkAuth = async () => {
+      if (authLoading) {
+        setAuthStatus("checking")
+        return
+      }
+
+      // Solo refrescar la sesión una vez para evitar bucles infinitos
+      if (!refreshed) {
+        setRefreshed(true)
+        await refreshSession()
+      }
+
+      if (user) {
+        setAuthStatus("authenticated")
+        console.log("Usuario autenticado:", user.email)
+      } else {
+        setAuthStatus("unauthenticated")
+        console.log("Usuario no autenticado")
+      }
+    }
+
+    checkAuth()
+  }, [user, authLoading, refreshSession, refreshed])
 
   const handleEmailLogin = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setIsLoading(true)
 
     try {
-      const { error } = await signIn(email, password)
+      console.log("Intentando iniciar sesión con:", email)
+      const { error, data } = await signIn(email, password)
 
       if (error) {
+        console.error("Error al iniciar sesión:", error)
         toast({
           title: "Error al iniciar sesión",
           description: error.message,
           variant: "destructive",
         })
+        setIsLoading(false)
         return
       }
 
+      console.log("Inicio de sesión exitoso, sesión:", !!data)
       toast({
         title: "Inicio de sesión exitoso",
         description: "Bienvenido de nuevo",
       })
 
-      router.push("/dashboard")
+      // Actualizar el estado
+      setAuthStatus("authenticated")
+
+      // Redirigir al dashboard después de un inicio de sesión exitoso
+      router.push(redirectPath)
     } catch (error) {
+      console.error("Error inesperado al iniciar sesión:", error)
       toast({
         title: "Error al iniciar sesión",
         description: "Ocurrió un error inesperado",
@@ -58,7 +97,9 @@ export default function LoginPage() {
     setIsLoading(true)
     try {
       await signInWithGoogle()
+      // La redirección se manejará automáticamente por Supabase OAuth
     } catch (error) {
+      console.error("Error de inicio de sesión con Google:", error)
       toast({
         title: "Error al iniciar sesión con Google",
         description: "Ocurrió un error inesperado",
@@ -68,6 +109,54 @@ export default function LoginPage() {
     }
   }
 
+  const handleManualRedirect = () => {
+    router.push(redirectPath)
+  }
+
+  // Si está cargando la autenticación, mostrar un indicador de carga
+  if (authStatus === "checking") {
+    return (
+      <div className="container flex items-center justify-center min-h-[calc(100vh-8rem)]">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold text-center">Verificando autenticación...</CardTitle>
+            <CardDescription className="text-center">
+              Estamos verificando tu estado de autenticación. Por favor, espera un momento.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-center py-6">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Si el usuario está autenticado, mostrar un mensaje y un botón para redirigir
+  if (authStatus === "authenticated") {
+    return (
+      <div className="container flex items-center justify-center min-h-[calc(100vh-8rem)]">
+        <Card className="w-full max-w-md">
+          <CardHeader>
+            <CardTitle className="text-2xl font-bold text-center">¡Ya has iniciado sesión!</CardTitle>
+            <CardDescription className="text-center">
+              Has iniciado sesión como <strong>{user?.email}</strong>
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex justify-center py-6">
+            <div className="text-center">
+              <p className="mb-4">Puedes continuar a tu dashboard o cerrar sesión.</p>
+            </div>
+          </CardContent>
+          <CardFooter className="flex justify-center gap-4">
+            <Button onClick={handleManualRedirect}>Ir al dashboard</Button>
+          </CardFooter>
+        </Card>
+      </div>
+    )
+  }
+
+  // Si el usuario no está autenticado, mostrar el formulario de inicio de sesión
   return (
     <div className="container flex items-center justify-center min-h-[calc(100vh-8rem)] py-12">
       <Card className="w-full max-w-md">
