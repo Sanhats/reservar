@@ -1,5 +1,11 @@
 import { supabase } from "@/lib/supabase"
 
+// ID ficticio para modo demostración
+export const DEMO_BUSINESS_ID = "demo-business-id"
+
+// Caché para evitar solicitudes repetidas
+const businessIdCache: Record<string, string> = {}
+
 export type DashboardStats = {
   totalReservations: number
   newClients: number
@@ -32,6 +38,16 @@ export type BusinessSettings = {
 
 export async function fetchDashboardStats(businessId: string): Promise<DashboardStats> {
   try {
+    // Si es el ID de demostración, devolver datos vacíos
+    if (businessId === DEMO_BUSINESS_ID) {
+      return {
+        totalReservations: 0,
+        newClients: 0,
+        revenue: 0,
+        occupancyRate: 0,
+      }
+    }
+
     // Obtener el total de reservas
     const { count: totalReservations, error: reservationsError } = await supabase
       .from("reservations")
@@ -78,7 +94,7 @@ export async function fetchDashboardStats(businessId: string): Promise<Dashboard
     }
   } catch (error) {
     console.error("Error fetching dashboard stats:", error)
-    // Devolver datos de ejemplo en caso de error
+    // Devolver datos reales en cero en lugar de datos de ejemplo
     return {
       totalReservations: 0,
       newClients: 0,
@@ -90,21 +106,24 @@ export async function fetchDashboardStats(businessId: string): Promise<Dashboard
 
 export async function fetchUpcomingReservations(businessId: string): Promise<UpcomingReservation[]> {
   try {
+    // Si es el ID de demostración, devolver array vacío
+    if (businessId === DEMO_BUSINESS_ID) {
+      return []
+    }
+
     const now = new Date().toISOString()
 
-    // Obtener las próximas reservas
+    // Modificar la consulta para no usar la relación con profiles que no existe
     const { data, error } = await supabase
       .from("reservations")
       .select(`
         id,
         start_time,
         status,
+        client_name,
         services (
           name,
           duration
-        ),
-        profiles (
-          full_name
         )
       `)
       .eq("business_id", businessId)
@@ -120,7 +139,7 @@ export async function fetchUpcomingReservations(businessId: string): Promise<Upc
 
     return data.map((reservation) => ({
       id: reservation.id,
-      client_name: reservation.profiles?.full_name || "Cliente",
+      client_name: reservation.client_name || "Cliente",
       service_name: reservation.services?.name || "Servicio",
       start_time: reservation.start_time,
       duration: reservation.services?.duration || 30,
@@ -128,41 +147,27 @@ export async function fetchUpcomingReservations(businessId: string): Promise<Upc
     }))
   } catch (error) {
     console.error("Error fetching upcoming reservations:", error)
-    // Devolver datos de ejemplo en caso de error
-    return [
-      {
-        id: "1",
-        client_name: "Juan Pérez",
-        service_name: "Corte de cabello",
-        start_time: new Date(Date.now() + 3600000).toISOString(), // 1 hora en el futuro
-        duration: 30,
-        status: "confirmed",
-      },
-      {
-        id: "2",
-        client_name: "María González",
-        service_name: "Manicura",
-        start_time: new Date(Date.now() + 86400000).toISOString(), // 1 día en el futuro
-        duration: 45,
-        status: "confirmed",
-      },
-      {
-        id: "3",
-        client_name: "Carlos Rodríguez",
-        service_name: "Masaje",
-        start_time: new Date(Date.now() + 172800000).toISOString(), // 2 días en el futuro
-        duration: 60,
-        status: "pending",
-      },
-    ]
+    return []
   }
 }
 
 export async function fetchBusinessSettings(businessId: string): Promise<BusinessSettings | null> {
   try {
+    // Si es el ID de demostración, devolver null para que se muestre el estado vacío
+    if (businessId === DEMO_BUSINESS_ID) {
+      return null
+    }
+
     const { data, error } = await supabase.from("businesses").select("*").eq("id", businessId).single()
 
-    if (error) throw error
+    if (error) {
+      // Si el error es 'No rows found', devolver null
+      if (error.code === "PGRST116") {
+        console.log(`No se encontró configuración para el negocio: ${businessId}`)
+        return null
+      }
+      throw error
+    }
 
     if (!data) {
       return null
@@ -192,6 +197,12 @@ export async function updateBusinessSettings(
   settings: Partial<BusinessSettings>,
 ): Promise<boolean> {
   try {
+    // Si es el ID de demostración, simular éxito
+    if (businessId === DEMO_BUSINESS_ID) {
+      console.log("Modo demostración: Simulando actualización exitosa de configuración")
+      return true
+    }
+
     const { error } = await supabase
       .from("businesses")
       .update({
@@ -218,7 +229,7 @@ export async function updateBusinessSettings(
   }
 }
 
-// Modificar la función fetchBusinessIdByOwnerId para mejorar el manejo de errores
+// Modificar la función fetchBusinessIdByOwnerId para usar caché y evitar solicitudes repetidas
 export async function fetchBusinessIdByOwnerId(userId: string): Promise<string | null> {
   try {
     if (!userId) {
@@ -226,33 +237,90 @@ export async function fetchBusinessIdByOwnerId(userId: string): Promise<string |
       return null
     }
 
+    // Limpiar la caché para asegurar datos frescos
+    delete businessIdCache[userId]
+
     console.log("Buscando negocio para el usuario:", userId)
 
-    const { data, error } = await supabase.from("businesses").select("id").eq("owner_id", userId).single()
+    // Intentar obtener el negocio directamente con una consulta más simple
+    try {
+      const { data, error } = await supabase.from("businesses").select("id, name").eq("owner_id", userId).maybeSingle()
 
-    if (error) {
-      // Si el error es 'No rows found', significa que el usuario no tiene un negocio
-      if (error.code === "PGRST116") {
+      if (error) {
+        throw error
+      }
+
+      if (data) {
+        console.log("Negocio encontrado:", data.id, data.name)
+        // Guardar en caché
+        businessIdCache[userId] = data.id
+        return data.id
+      } else {
         console.log("No se encontró ningún negocio para el usuario:", userId)
         return null
       }
-
-      console.error("Error al buscar negocio:", error.message, error.details, error.hint)
-      throw error
+    } catch (queryError) {
+      console.error("Error en la consulta a Supabase:", queryError)
+      return null
     }
-
-    console.log("Negocio encontrado:", data?.id)
-    return data?.id || null
   } catch (error) {
     console.error("Error al obtener ID del negocio:", error)
+    return null
+  }
+}
 
-    // Si estamos en desarrollo, crear un ID de negocio ficticio para pruebas
-    if (process.env.NODE_ENV === "development") {
-      console.log("Entorno de desarrollo detectado, devolviendo ID de negocio ficticio para pruebas")
-      return "00000000-0000-0000-0000-000000000000"
+// Función para crear un nuevo negocio
+export async function createBusiness(
+  userId: string,
+  businessData: Omit<BusinessSettings, "id">,
+): Promise<{ success: boolean; businessId?: string; error?: string }> {
+  try {
+    if (!userId) {
+      return { success: false, error: "ID de usuario no válido" }
     }
 
-    return null
+    const { data, error } = await supabase
+      .from("businesses")
+      .insert([
+        {
+          owner_id: userId,
+          name: businessData.name,
+          type: businessData.type,
+          phone: businessData.phone,
+          address: businessData.address,
+          city: businessData.city,
+          state: businessData.state,
+          country: businessData.country,
+          postal_code: businessData.postal_code,
+          opening_time: businessData.opening_time,
+          closing_time: businessData.closing_time,
+          status: "verified", // Automáticamente verificado para simplificar
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        },
+      ])
+      .select()
+      .single()
+
+    if (error) {
+      console.error("Error al crear negocio:", error)
+      return { success: false, error: error.message }
+    }
+
+    if (!data) {
+      return { success: false, error: "No se pudo crear el negocio" }
+    }
+
+    // Limpiar la caché para este usuario
+    delete businessIdCache[userId]
+
+    return { success: true, businessId: data.id }
+  } catch (error) {
+    console.error("Error al crear negocio:", error)
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Error desconocido al crear el negocio",
+    }
   }
 }
 

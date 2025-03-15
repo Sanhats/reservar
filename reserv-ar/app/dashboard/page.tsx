@@ -2,10 +2,21 @@
 
 import type React from "react"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CalendarIcon, UsersIcon, CreditCardIcon, BarChartIcon, Loader2 } from "lucide-react"
+import {
+  CalendarIcon,
+  UsersIcon,
+  CreditCardIcon,
+  BarChartIcon,
+  Loader2,
+  PlusCircle,
+  Settings,
+  Calendar,
+} from "lucide-react"
+import { useRouter } from "next/navigation"
+import Link from "next/link"
 import RouteGuard from "@/components/route-guard"
 import { useAuth } from "@/lib/auth"
 import {
@@ -14,9 +25,11 @@ import {
   fetchBusinessSettings,
   fetchBusinessIdByOwnerId,
   updateBusinessSettings,
+  createBusiness,
   type DashboardStats,
   type UpcomingReservation,
   type BusinessSettings,
+  DEMO_BUSINESS_ID,
 } from "@/lib/services/dashboard-service"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,87 +41,134 @@ import { es } from "date-fns/locale"
 // Importar el componente de calendario
 import ReservationCalendar from "@/components/reservation-calendar"
 
+// Actualizar la primera línea del componente
 export default function DashboardPage() {
   const { user } = useAuth()
   const { toast } = useToast()
+  const router = useRouter()
   const [businessId, setBusinessId] = useState<string | null>(null)
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [upcomingReservations, setUpcomingReservations] = useState<UpcomingReservation[]>([])
   const [businessSettings, setBusinessSettings] = useState<BusinessSettings | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isBusinessIdLoaded, setIsBusinessIdLoaded] = useState(false)
+  const [isDataLoaded, setIsDataLoaded] = useState(false)
+  const [isCreatingBusiness, setIsCreatingBusiness] = useState(false)
+  const [newBusinessName, setNewBusinessName] = useState("")
+  const [newBusinessType, setNewBusinessType] = useState("")
+  const [loadingReservations, setLoadingReservations] = useState(false)
+  const [reservationsError, setReservationsError] = useState(false)
 
-  // Obtener el ID del negocio
+  // Obtener el ID del negocio - solo una vez
   useEffect(() => {
+    let isMounted = true
+
     const getBusinessId = async () => {
-      if (user) {
-        try {
-          console.log("Obteniendo ID de negocio para usuario:", user.id)
-          const id = await fetchBusinessIdByOwnerId(user.id)
+      if (!user || isBusinessIdLoaded) return
 
-          if (id) {
-            console.log("ID de negocio obtenido:", id)
-            setBusinessId(id)
-          } else {
-            console.log("No se encontró un negocio para este usuario. Creando datos de ejemplo para la demostración.")
-            // Usar un ID ficticio para demostración si no se encuentra un negocio
-            setBusinessId("00000000-0000-0000-0000-000000000000")
+      try {
+        console.log("Obteniendo ID de negocio para usuario:", user.id)
+        const id = await fetchBusinessIdByOwnerId(user.id)
 
-            // Mostrar un mensaje al usuario
+        if (!isMounted) return
+
+        if (id) {
+          console.log("ID de negocio obtenido:", id)
+          setBusinessId(id)
+          if (id === DEMO_BUSINESS_ID) {
+            console.log("Modo demostración activado")
             toast({
               title: "Modo demostración",
-              description: "No se encontró un negocio asociado a tu cuenta. Se están mostrando datos de ejemplo.",
+              description: "Estás viendo datos de ejemplo. Crea un negocio para comenzar.",
             })
           }
-        } catch (error) {
-          console.error("Error al obtener ID de negocio:", error)
-          // Usar un ID ficticio para demostración en caso de error
-          setBusinessId("00000000-0000-0000-0000-000000000000")
-
+        } else {
+          console.log("No se encontró un negocio para este usuario.")
+          setBusinessId(DEMO_BUSINESS_ID)
           toast({
-            title: "Error",
-            description: "No se pudo obtener la información del negocio. Se están mostrando datos de ejemplo.",
-            variant: "destructive",
+            title: "Bienvenido",
+            description: "Para comenzar, crea tu negocio usando el formulario a continuación.",
           })
+        }
+      } catch (error) {
+        console.error("Error al obtener ID de negocio:", error)
+
+        if (!isMounted) return
+
+        setBusinessId(DEMO_BUSINESS_ID)
+
+        toast({
+          title: "Modo demostración",
+          description: "No se pudo obtener la información del negocio. Mostrando datos de ejemplo.",
+        })
+      } finally {
+        if (isMounted) {
+          setIsBusinessIdLoaded(true)
         }
       }
     }
 
     getBusinessId()
-  }, [user, toast])
+
+    return () => {
+      isMounted = false
+    }
+  }, [user, toast, isBusinessIdLoaded])
 
   // Cargar datos del dashboard
-  useEffect(() => {
-    const loadDashboardData = async () => {
-      if (!businessId) return
+  const loadDashboardData = useCallback(async () => {
+    if (!businessId || isDataLoaded) return
 
-      setIsLoading(true)
+    setIsLoading(true)
+    try {
+      // Cargar estadísticas
+      const statsData = await fetchDashboardStats(businessId)
+      setStats(statsData)
+
+      // Cargar próximas reservas
+      setLoadingReservations(true)
+      setReservationsError(false)
       try {
-        // Cargar estadísticas
-        const statsData = await fetchDashboardStats(businessId)
-        setStats(statsData)
-
-        // Cargar próximas reservas
         const reservationsData = await fetchUpcomingReservations(businessId)
         setUpcomingReservations(reservationsData)
-
-        // Cargar configuración del negocio
-        const settingsData = await fetchBusinessSettings(businessId)
-        setBusinessSettings(settingsData)
       } catch (error) {
-        console.error("Error loading dashboard data:", error)
-        toast({
-          title: "Error",
-          description: "No se pudieron cargar los datos del dashboard",
-          variant: "destructive",
-        })
+        console.error("Error loading reservations:", error)
+        setReservationsError(true)
+        // Proporcionar datos de ejemplo en caso de error
+        setUpcomingReservations([])
       } finally {
-        setIsLoading(false)
+        setLoadingReservations(false)
       }
-    }
 
-    loadDashboardData()
-  }, [businessId, toast])
+      // Cargar configuración del negocio
+      const settingsData = await fetchBusinessSettings(businessId)
+
+      if (settingsData) {
+        setBusinessSettings(settingsData)
+      }
+
+      setIsDataLoaded(true)
+    } catch (error) {
+      console.error("Error loading dashboard data:", error)
+      toast({
+        title: "Error",
+        description: "No se pudieron cargar los datos del dashboard",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
+    }
+  }, [businessId, toast, isDataLoaded])
+
+  useEffect(() => {
+    if (businessId && !isDataLoaded) {
+      loadDashboardData()
+    } else if (!businessId && isBusinessIdLoaded) {
+      // Si no hay negocio pero ya se verificó, dejar de cargar
+      setIsLoading(false)
+    }
+  }, [businessId, isDataLoaded, loadDashboardData, isBusinessIdLoaded])
 
   const handleSettingsSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -149,6 +209,62 @@ export default function DashboardPage() {
     })
   }
 
+  const handleCreateBusiness = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!user || !newBusinessName || !newBusinessType) {
+      toast({
+        title: "Error",
+        description: "Por favor completa todos los campos requeridos",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setIsCreatingBusiness(true)
+
+    try {
+      const result = await createBusiness(user.id, {
+        name: newBusinessName,
+        type: newBusinessType,
+        phone: "",
+        address: "",
+        city: "",
+        state: "",
+        country: "",
+        postal_code: "",
+        opening_time: "09:00",
+        closing_time: "18:00",
+      })
+
+      if (result.success && result.businessId) {
+        toast({
+          title: "Negocio creado",
+          description: "Tu negocio ha sido creado correctamente",
+        })
+
+        // Actualizar el estado y recargar los datos
+        setBusinessId(result.businessId)
+        setIsBusinessIdLoaded(true)
+        setIsDataLoaded(false)
+
+        // Recargar la página para asegurar que todo se actualice correctamente
+        window.location.reload()
+      } else {
+        throw new Error(result.error || "No se pudo crear el negocio")
+      }
+    } catch (error) {
+      console.error("Error creating business:", error)
+      toast({
+        title: "Error",
+        description: "No se pudo crear el negocio",
+        variant: "destructive",
+      })
+    } finally {
+      setIsCreatingBusiness(false)
+    }
+  }
+
   // Formatear fecha y hora
   const formatDateTime = (dateString: string) => {
     try {
@@ -159,20 +275,89 @@ export default function DashboardPage() {
     }
   }
 
+  // Si no hay negocio, mostrar formulario para crear uno
+  if (isBusinessIdLoaded && businessId === DEMO_BUSINESS_ID && !isLoading) {
+    return (
+      <RouteGuard>
+        <div className="container py-10">
+          <h1 className="text-3xl font-bold mb-6">Configuración Inicial</h1>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Configura tu Negocio</CardTitle>
+              <CardDescription>
+                Para comenzar a usar el sistema de reservas, necesitas configurar tu negocio.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateBusiness} className="space-y-4">
+                <div className="space-y-2">
+                  <Label htmlFor="business-name">Nombre del Negocio</Label>
+                  <Input
+                    id="business-name"
+                    value={newBusinessName}
+                    onChange={(e) => setNewBusinessName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="business-type">Tipo de Negocio</Label>
+                  <select
+                    id="business-type"
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    value={newBusinessType}
+                    onChange={(e) => setNewBusinessType(e.target.value)}
+                    required
+                  >
+                    <option value="">Selecciona un tipo</option>
+                    <option value="restaurant">Restaurante</option>
+                    <option value="salon">Salón de belleza</option>
+                    <option value="medical">Consultorio médico</option>
+                    <option value="gym">Gimnasio</option>
+                    <option value="other">Otro</option>
+                  </select>
+                </div>
+                <Button type="submit" className="w-full" disabled={isCreatingBusiness}>
+                  {isCreatingBusiness ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Creando...
+                    </>
+                  ) : (
+                    "Crear Negocio"
+                  )}
+                </Button>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </RouteGuard>
+    )
+  }
+
   return (
-    <RouteGuard>
+    <RouteGuard requiredRole="business" redirectTo="/business/login">
       <div className="container py-10">
         <h1 className="text-3xl font-bold mb-6">Panel de Control</h1>
 
         <Card className="mb-8">
           <CardHeader>
             <CardTitle>Bienvenido, {user?.email}</CardTitle>
-            <CardDescription>Has iniciado sesión correctamente. Este es tu panel de control.</CardDescription>
+            <CardDescription>
+              {businessId === DEMO_BUSINESS_ID
+                ? "Estás en modo demostración. Crea tu negocio para acceder a todas las funcionalidades."
+                : "Has iniciado sesión correctamente. Este es tu panel de control."}
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <p>ID de usuario: {user?.id}</p>
             <p>Email: {user?.email}</p>
             <p>Último inicio de sesión: {new Date(user?.last_sign_in_at || "").toLocaleString()}</p>
+            {businessSettings && businessId !== DEMO_BUSINESS_ID && (
+              <p className="mt-2">
+                Negocio: <strong>{businessSettings.name}</strong>
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -191,7 +376,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats?.totalReservations || 0}</div>
-                  <p className="text-xs text-muted-foreground">+14% respecto al mes pasado</p>
+                  <p className="text-xs text-muted-foreground">Reservas registradas</p>
                 </CardContent>
               </Card>
               <Card>
@@ -201,7 +386,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats?.newClients || 0}</div>
-                  <p className="text-xs text-muted-foreground">+8% respecto al mes pasado</p>
+                  <p className="text-xs text-muted-foreground">Últimos 30 días</p>
                 </CardContent>
               </Card>
               <Card>
@@ -211,7 +396,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">${stats?.revenue || 0}</div>
-                  <p className="text-xs text-muted-foreground">+12% respecto al mes pasado</p>
+                  <p className="text-xs text-muted-foreground">Reservas completadas</p>
                 </CardContent>
               </Card>
               <Card>
@@ -221,7 +406,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold">{stats?.occupancyRate || 0}%</div>
-                  <p className="text-xs text-muted-foreground">+5% respecto al mes pasado</p>
+                  <p className="text-xs text-muted-foreground">Capacidad utilizada</p>
                 </CardContent>
               </Card>
             </div>
@@ -239,9 +424,38 @@ export default function DashboardPage() {
                     <CardDescription>Gestiona las reservas programadas para los próximos días.</CardDescription>
                   </CardHeader>
                   <CardContent>
-                    {upcomingReservations.length === 0 ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        No hay reservas próximas programadas.
+                    {loadingReservations ? (
+                      <div className="flex justify-center items-center h-40">
+                        <Loader2 className="h-8 w-8 animate-spin text-primary mr-2" />
+                        <span>Cargando reservas...</span>
+                      </div>
+                    ) : reservationsError ? (
+                      <div className="text-center py-8 flex flex-col items-center">
+                        <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-medium mb-2">Error al cargar reservas</h3>
+                        <p className="text-muted-foreground mb-4">
+                          No se pudieron cargar las reservas. Por favor, intenta de nuevo más tarde.
+                        </p>
+                        <Button onClick={() => window.location.reload()}>Reintentar</Button>
+                      </div>
+                    ) : upcomingReservations.length === 0 ? (
+                      <div className="text-center py-8 flex flex-col items-center">
+                        <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-medium mb-2">No hay reservas próximas</h3>
+                        <p className="text-muted-foreground mb-4">
+                          Para ver reservas aquí, necesitas configurar tus servicios y recibir reservas de clientes.
+                        </p>
+                        <div className="flex gap-4">
+                          <Button asChild>
+                            <Link href="/dashboard/services">
+                              <PlusCircle className="h-4 w-4 mr-2" />
+                              Configurar servicios
+                            </Link>
+                          </Button>
+                          <Button variant="outline" asChild>
+                            <Link href="/reservations">Ver página de reservas</Link>
+                          </Button>
+                        </div>
                       </div>
                     ) : (
                       <div className="space-y-4">
@@ -272,10 +486,18 @@ export default function DashboardPage() {
                     {businessId ? (
                       <ReservationCalendar businessId={businessId} />
                     ) : (
-                      <div className="h-[400px] flex items-center justify-center border rounded-lg">
-                        <p className="text-muted-foreground">
-                          No se pudo cargar el calendario. Por favor, configura tu negocio primero.
+                      <div className="h-[400px] flex flex-col items-center justify-center border rounded-lg">
+                        <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-medium mb-2">Calendario no disponible</h3>
+                        <p className="text-muted-foreground mb-4 text-center max-w-md">
+                          Para ver el calendario de reservas, primero debes configurar tu negocio y crear servicios.
                         </p>
+                        <Button asChild>
+                          <Link href="/dashboard/settings">
+                            <Settings className="h-4 w-4 mr-2" />
+                            Configurar negocio
+                          </Link>
+                        </Button>
                       </div>
                     )}
                   </CardContent>
@@ -289,9 +511,16 @@ export default function DashboardPage() {
                   </CardHeader>
                   <CardContent>
                     {!businessSettings ? (
-                      <div className="text-center py-8">
-                        <p className="text-muted-foreground mb-4">No se encontró información del negocio</p>
-                        <Button>Configurar negocio</Button>
+                      <div className="text-center py-8 flex flex-col items-center">
+                        <Settings className="h-12 w-12 text-muted-foreground mb-4" />
+                        <h3 className="text-lg font-medium mb-2">Configura tu negocio</h3>
+                        <p className="text-muted-foreground mb-4 max-w-md">
+                          Para comenzar a recibir reservas, necesitas configurar la información básica de tu negocio.
+                        </p>
+                        <Button onClick={() => router.push("/dashboard/settings")}>
+                          <Settings className="h-4 w-4 mr-2" />
+                          Configurar ahora
+                        </Button>
                       </div>
                     ) : (
                       <form onSubmit={handleSettingsSubmit} className="space-y-4">

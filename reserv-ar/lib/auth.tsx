@@ -16,7 +16,7 @@ type AuthContextType = {
     error: Error | null
     data: Session | null
   }>
-  signInWithGoogle: () => Promise<void>
+  signInWithGoogle: (userType?: "client" | "business") => Promise<void>
   signUp: (
     email: string,
     password: string,
@@ -228,12 +228,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }
 
-  const signInWithGoogle = async () => {
+  // Actualizar la función signInWithGoogle para aceptar el tipo de usuario
+  const signInWithGoogle = async (userType: "client" | "business" = "client") => {
     try {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            // Pasar el tipo de usuario como parámetro para usarlo después
+            user_type: userType,
+          },
         },
       })
 
